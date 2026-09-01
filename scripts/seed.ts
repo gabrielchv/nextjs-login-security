@@ -6,18 +6,28 @@ const DEMO_USERS = [
   { username: "bob", password: "hunter2" },
 ];
 
-const insert = db.prepare(
-  `INSERT INTO users (username, password_hash, password_plain) VALUES (?, ?, ?)
-   ON CONFLICT(username) DO UPDATE SET
-     password_hash  = excluded.password_hash,
-     password_plain = excluded.password_plain`,
-);
+/**
+ * Rows are cleared with DELETE rather than by unlinking data/app.db, so the
+ * script is safe to run while the dev server holds an open connection —
+ * removing the file underneath a running server leaves it on a stale handle
+ * and every later query fails with "disk I/O error".
+ */
+const reset = db.transaction(() => {
+  db.prepare("DELETE FROM sessions").run();
+  db.prepare("DELETE FROM login_attempts").run();
+  db.prepare("DELETE FROM users").run();
+
+  const insert = db.prepare(
+    "INSERT INTO users (username, password_hash, password_plain) VALUES (?, ?, ?)",
+  );
+  for (const user of DEMO_USERS) {
+    insert.run(user.username, hashPassword(user.password), user.password);
+  }
+});
+
+reset();
 
 for (const user of DEMO_USERS) {
-  insert.run(user.username, hashPassword(user.password), user.password);
   console.log(`seeded: ${user.username} / ${user.password}`);
 }
-
-db.prepare("DELETE FROM login_attempts").run();
-db.prepare("DELETE FROM sessions").run();
-console.log("cleared: login_attempts, sessions");
+console.log("cleared: sessions, login_attempts");

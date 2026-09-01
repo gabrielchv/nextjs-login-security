@@ -30,7 +30,9 @@ npm run dev       # http://localhost:3000
 
 Contas de teste: `alice / senha123` e `bob / hunter2`.
 
-`npm run db:reset` apaga o banco e recria tudo — útil para limpar um bloqueio.
+Rode `npm run db:seed` de novo a qualquer momento para voltar ao estado inicial —
+útil para limpar um bloqueio por tentativas. O script apaga as linhas em vez de
+remover `data/app.db`, então é seguro executá-lo com o servidor rodando.
 
 ## Testando os ataques
 
@@ -59,7 +61,7 @@ curl -i -X POST localhost:3000/api/login \
 Com o servidor rodando em outro terminal:
 
 ```bash
-npm run db:reset
+npm run db:seed
 npm run smoke          # ou: BASE=http://localhost:3001 npm run smoke
 ```
 
