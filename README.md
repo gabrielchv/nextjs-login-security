@@ -1,36 +1,92 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Login Security Lab
 
-## Getting Started
+Duas telas de login em Next.js sobre o mesmo banco SQLite: uma escrita com as
+defesas aplicadas (`/login`) e outra vulnerável de propósito (`/login-injection`).
+O objetivo é rodar o mesmo payload nas duas rotas e ver a diferença.
 
-First, run the development server:
+> ⚠️ **A rota `/login-injection` é insegura de propósito.** Ela existe só para
+> demonstração. Não copie esse código para nenhum projeto real.
+
+## O que está demonstrado
+
+| Defesa | Onde | Como |
+| --- | --- | --- |
+| CSRF | `src/lib/csrf.ts`, `src/proxy.ts` | Token de 32 bytes em cookie `httpOnly`, replicado num campo escondido do formulário. O POST só passa se as duas cópias baterem. |
+| SQL injection (corrigida) | `src/app/api/login/route.ts` | `prepare(... WHERE username = ?)` — o input é vinculado como parâmetro, nunca concatenado. |
+| SQL injection (vulnerável) | `src/app/api/login-injection/route.ts` | A query é montada por interpolação de string e a resposta devolve o SQL executado. |
+| Bloqueio por tentativas | `src/lib/ratelimit.ts` | 5 senhas erradas bloqueiam a conta por 15 minutos (HTTP 429). |
+| Anti-robô | `src/lib/captcha.ts`, `src/app/api/captcha/route.ts` | CAPTCHA em SVG gerado no próprio servidor. Sem rede externa, sem chave de API. |
+
+Extras: senhas guardadas como `scrypt` com salt (`src/lib/password.ts`) e sessão
+por cookie `httpOnly` apontando para a tabela `sessions` (`src/lib/session.ts`).
+
+## Rodando
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run db:seed   # cria data/app.db e as contas de teste
+npm run dev       # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Contas de teste: `alice / senha123` e `bob / hunter2`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`npm run db:reset` apaga o banco e recria tudo — útil para limpar um bloqueio.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Testando os ataques
 
-## Learn More
+Na página **/login-injection**, use os botões de payload pronto ou digite à mão:
 
-To learn more about Next.js, take a look at the following resources:
+| Usuário | Senha | Resultado |
+| --- | --- | --- |
+| `' OR '1'='1' --` | qualquer coisa | Entra como o primeiro usuário da tabela, sem senha |
+| `alice' --` | qualquer coisa | Entra como `alice`, sem senha |
+| `'` | qualquer coisa | Quebra a query e vaza a mensagem de erro do SQLite |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Os mesmos payloads em **/login** retornam apenas "Usuário ou senha inválidos" e
+ainda consomem uma das 5 tentativas.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Para ver o CSRF barrando um POST forjado, com o servidor rodando:
 
-## Deploy on Vercel
+```bash
+curl -i -X POST localhost:3000/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"senha123"}'
+# HTTP/1.1 403 Forbidden — {"error":"Token CSRF inválido ou ausente."}
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Suíte de fumaça
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Com o servidor rodando em outro terminal:
+
+```bash
+npm run db:reset
+npm run smoke          # ou: BASE=http://localhost:3001 npm run smoke
+```
+
+O script exercita, via `curl`, os oito cenários: POST sem CSRF, CAPTCHA errado,
+payload de injection na rota corrigida, as cinco tentativas até o bloqueio, a
+tentativa bloqueada, o login válido, o acesso ao dashboard com a sessão e o
+bypass na rota vulnerável. Ele resolve o CAPTCHA lendo as letras direto do SVG —
+o que também mostra que um CAPTCHA renderizado como texto SVG segura robô
+genérico, não um script escrito contra esta aplicação específica.
+
+## Falhas propositais desta demo
+
+Além da concatenação de SQL em `/login-injection`, estão aqui de propósito e
+seriam inaceitáveis em produção:
+
+- a tabela `users` guarda `password_plain`, sem o que a query vulnerável não
+  teria como comparar a senha em texto na string SQL;
+- a rota vulnerável não tem bloqueio por tentativas nem CAPTCHA, então o ataque
+  pode ser automatizado à vontade;
+- a resposta da rota vulnerável devolve o SQL executado e a mensagem de erro do
+  banco para o cliente;
+- o segredo do HMAC do CAPTCHA tem um valor padrão embutido (`src/lib/secret.ts`)
+  para o projeto rodar sem configuração; o correto é ler de `APP_SECRET` e
+  recusar iniciar se a variável não existir.
+
+## Stack
+
+Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · better-sqlite3 ·
+`node:crypto` para hash, HMAC e comparação em tempo constante. Nenhuma
+dependência de serviço externo — roda inteiramente offline.
