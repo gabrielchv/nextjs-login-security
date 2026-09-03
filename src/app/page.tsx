@@ -36,8 +36,7 @@ export default async function Home() {
       <h1 className="text-3xl font-bold">Login Security Lab</h1>
       <p className="mt-3 text-slate-600 dark:text-slate-400">
         Duas telas de login sobre o mesmo banco SQLite: uma escrita com as defesas
-        aplicadas, outra vulnerável de propósito. Compare o resultado do mesmo
-        payload nas duas.
+        aplicadas, outra vulnerável de propósito.
       </p>
 
       {user && (

@@ -18,8 +18,7 @@ export default async function LoginInjectionPage() {
         <p className="font-semibold">Vulnerável de propósito</p>
         <p className="mt-1">
           Esta rota monta a query concatenando o que você digita e compara a senha
-          contra uma coluna em texto puro. Existe só para demonstração — nunca use
-          este código em produção.
+          contra uma coluna em texto puro.
         </p>
       </div>
 
