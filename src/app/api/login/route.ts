@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { CAPTCHA_COOKIE, CAPTCHA_FIELD, verifyCaptcha } from "@/lib/captcha";
 import { CSRF_COOKIE, CSRF_FIELD, verifyCsrfToken } from "@/lib/csrf";
 import { db, type UserRow } from "@/lib/db";
-import { verifyPassword } from "@/lib/password";
+import { verifyPasswordOrDecoy } from "@/lib/password";
 import { attemptsLeft, checkLock, clearFailures, registerFailure } from "@/lib/ratelimit";
 import { createSession } from "@/lib/session";
 
@@ -61,9 +61,12 @@ export async function POST(request: Request) {
     .prepare("SELECT id, username, password_hash, password_plain FROM users WHERE username = ?")
     .get(username) as UserRow | undefined;
 
-  // 5. Constant-time scrypt verification. Always runs a comparison so that a
-  //    missing user and a wrong password fail the same way.
-  const ok = user ? verifyPassword(password, user.password_hash) : false;
+  // 5. Constant-time scrypt verification. This runs for every request, even
+  //    when the username does not exist: `verifyPasswordOrDecoy` falls back to
+  //    a decoy hash, so both branches pay one scrypt. Skipping it for a missing
+  //    user would make a bad username answer ~4x faster than a bad password and
+  //    turn the form into a username-enumeration oracle (see password.ts).
+  const ok = verifyPasswordOrDecoy(password, user?.password_hash);
 
   if (!ok || !user) {
     const afterFailure = registerFailure(username);

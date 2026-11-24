@@ -4,7 +4,7 @@ Duas telas de login em Next.js sobre o mesmo banco SQLite: uma escrita com as
 defesas aplicadas (`/login`) e outra vulnerável de propósito (`/login-injection`).
 O objetivo é rodar o mesmo payload nas duas rotas e ver a diferença.
 
-> ⚠️ **A rota `/login-injection` é insegura de propósito.** Ela existe só para
+> **A rota `/login-injection` é insegura de propósito.** Ela existe só para
 > demonstração. Não copie esse código para nenhum projeto real.
 
 ## O que está demonstrado
@@ -16,9 +16,29 @@ O objetivo é rodar o mesmo payload nas duas rotas e ver a diferença.
 | SQL injection (vulnerável) | `src/app/api/login-injection/route.ts` | A query é montada por interpolação de string e a resposta devolve o SQL executado. |
 | Bloqueio por tentativas | `src/lib/ratelimit.ts` | 5 senhas erradas bloqueiam a conta por 15 minutos (HTTP 429). |
 | Anti-robô | `src/lib/captcha.ts`, `src/app/api/captcha/route.ts` | CAPTCHA em SVG gerado no próprio servidor. Sem rede externa, sem chave de API. |
+| Enumeração de usuários por tempo | `src/lib/password.ts` | Um usuário inexistente paga o mesmo `scrypt` que uma senha errada, através de um hash-isca. Sem isso a resposta vinha ~4× mais rápido e denunciava quais logins existem. |
+| Cabeçalhos de segurança | `next.config.ts` | CSP restringindo `frame-ancestors`, `base-uri`, `form-action` e `object-src`; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, e HSTS apenas em produção. |
 
-Extras: senhas guardadas como `scrypt` com salt (`src/lib/password.ts`) e sessão
-por cookie `httpOnly` apontando para a tabela `sessions` (`src/lib/session.ts`).
+Extras: senhas guardadas como `scrypt` com salt (`src/lib/password.ts`), sessão
+por cookie `httpOnly` apontando para a tabela `sessions` (`src/lib/session.ts`) e
+testes de regressão em `tests/` (`npm test`).
+
+### O canal de tempo, em números
+
+O jeito óbvio de escrever o passo 5 da rota `/api/login` é
+`user ? verifyPassword(...) : false`. Parece inofensivo, e um comentário antigo
+até afirmava que os dois casos falhavam "do mesmo jeito" — mas só um deles roda
+`scrypt`. Medido contra o servidor local, com senha errada:
+
+```
+usuário existente:  48–62 ms
+usuário inexistente: 11–16 ms
+```
+
+Quatro vezes de diferença é sinal suficiente para descobrir, sem nenhum erro
+visível, quais usernames têm conta. Depois da correção as duas faixas se
+sobrepõem (~40–55 ms), e `tests/security.test.ts` falha se alguém reintroduzir o
+atalho.
 
 ## Rodando
 
@@ -55,6 +75,16 @@ curl -i -X POST localhost:3000/api/login \
   -d '{"username":"alice","password":"senha123"}'
 # HTTP/1.1 403 Forbidden — {"error":"Token CSRF inválido ou ausente."}
 ```
+
+### Testes
+
+```bash
+npm test
+```
+
+Cobrem os módulos puros — verificação de senha (incluindo a paridade de tempo
+entre usuário existente e inexistente) e o token CSRF. Não precisam de servidor
+nem de banco.
 
 ### Suíte de fumaça
 
